@@ -186,8 +186,8 @@ module RocketAMF
   # data structure and return it. Creates an instance of <tt>RocketAMF::Deserializer</tt>
   # with a new instance of <tt>RocketAMF::ClassMapper</tt> and calls deserialize
   # on it with the given source and amf version, returning the result.
-  def self.deserialize source, amf_version = 0
-    des = RocketAMF::Deserializer.new(RocketAMF::ClassMapper.new)
+  def self.deserialize source, amf_version = 0, use_mapping = true
+    des = RocketAMF::Deserializer.new(RocketAMF::ClassMapper.new, use_mapping)
     des.deserialize(amf_version, source)
   end
 
@@ -195,8 +195,8 @@ module RocketAMF
   # given AMF version. Creates an instance of <tt>RocketAMF::Serializer</tt>
   # with a new instance of <tt>RocketAMF::ClassMapper</tt> and calls serialize
   # on it with the given object and amf version, returning the result.
-  def self.serialize obj, amf_version = 0
-    ser = RocketAMF::Serializer.new(RocketAMF::ClassMapper.new)
+  def self.serialize obj, amf_version = 0, use_mapping = true
+    ser = RocketAMF::Serializer.new(RocketAMF::ClassMapper.new, use_mapping)
     ser.serialize(amf_version, obj)
   end
 

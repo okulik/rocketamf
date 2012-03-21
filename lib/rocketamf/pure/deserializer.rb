@@ -5,12 +5,16 @@ module RocketAMF
     # Pure ruby deserializer for AMF0 and AMF3
     class Deserializer
       attr_accessor :source
-
+      attr_reader :use_mapping
+      
+      MAX_INT = (2**31 - 1)
+      
       # Pass in the class mapper instance to use when deserializing. This
       # enables better caching behavior in the class mapper and allows
       # one to change mappings between deserialization attempts.
-      def initialize class_mapper
+      def initialize class_mapper, use_mapping = true
         @class_mapper = class_mapper
+        @use_mapping = use_mapping
       end
 
       # Deserialize the source using AMF0 or AMF3. Source should either
@@ -199,6 +203,14 @@ module RocketAMF
           amf3_read_byte_array
         when AMF3_DICT_MARKER
           amf3_read_dict
+        when AMF3_VEC_INT_MARKER
+          amf3_read_vec_int
+        when AMF3_VEC_UINT_MARKER
+          amf3_read_vec_uint
+        when AMF3_VEC_NUMBER_MARKER
+          amf3_read_vec_number
+        when AMF3_VEC_OBJECT_MARKER
+          amf3_read_vec_object
         else
           raise AMFError, "Invalid type: #{type}"
         end
@@ -345,15 +357,21 @@ module RocketAMF
                      }
             @trait_cache << traits
           end
-
+          
+          class_name = traits[:class_name]
+          
           # Optimization for deserializing ArrayCollection
-          if traits[:class_name] == "flex.messaging.io.ArrayCollection"
+          if class_name == "flex.messaging.io.ArrayCollection"
             arr = amf3_deserialize # Adds ArrayCollection array to object cache
             @object_cache << arr # Add again for ArrayCollection source array
             return arr
           end
-
-          obj = @class_mapper.get_ruby_obj traits[:class_name]
+          
+          obj = RocketAMF::Values::TypedHash.new(class_name)
+          if @use_mapping
+            obj = @class_mapper.get_ruby_obj class_name
+          end
+          
           @object_cache << obj
 
           if traits[:externalizable]
@@ -410,6 +428,88 @@ module RocketAMF
             dict[amf3_deserialize] = amf3_deserialize
           end
           dict
+        end
+      end
+      
+      def amf3_read_vec_int
+        type = amf3_read_integer
+        isReference = (type & 0x01) == 0
+
+        if isReference
+          reference = type >> 1
+          return @object_cache[reference]
+        else
+          length = type >> 1
+          amf3_read_integer # skip fixed-length property
+          vec = Values::Vector.new :int
+          length.times do
+            n = read_word32_network(@source)
+            # check if integer should be negative
+            if (n > MAX_INT)
+              n -= (1 << 32)
+            end
+            vec << n
+          end
+          @object_cache << vec
+          vec
+        end
+      end
+      
+      def amf3_read_vec_uint
+        type = amf3_read_integer
+        isReference = (type & 0x01) == 0
+
+        if isReference
+          reference = type >> 1
+          return @object_cache[reference]
+        else
+          length = type >> 1
+          amf3_read_integer # skip fixed-length property
+          vec = Values::Vector.new :uint
+          length.times do
+            vec << read_word32_network(@source)
+          end
+          @object_cache << vec
+          vec
+        end
+      end
+      
+      def amf3_read_vec_number
+        type = amf3_read_integer
+        isReference = (type & 0x01) == 0
+
+        if isReference
+          reference = type >> 1
+          return @object_cache[reference]
+        else
+          length = type >> 1
+          amf3_read_integer # skip fixed-length property
+          vec = Values::Vector.new :number
+          length.times do
+            vec << read_number
+          end
+          @object_cache << vec
+          vecv
+        end
+      end
+      
+      def amf3_read_vec_object
+        type = amf3_read_integer
+        isReference = (type & 0x01) == 0
+
+        if isReference
+          reference = type >> 1
+          return @object_cache[reference]
+        else
+          length = type >> 1
+          amf3_read_integer  # skip fixed-length property
+          class_name = amf3_read_string # read class name
+          vec = Values::Vector.new :object, class_name
+          length.times do
+            vec << amf3_deserialize
+          end
+          @object_cache << vec
+          vec
         end
       end
     end

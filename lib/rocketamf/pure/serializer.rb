@@ -5,14 +5,16 @@ module RocketAMF
     # Pure ruby serializer for AMF0 and AMF3
     class Serializer
       attr_reader :stream, :version
+      attr_reader :use_mapping
 
       # Pass in the class mapper instance to use when serializing. This enables
       # better caching behavior in the class mapper and allows one to change
       # mappings between serialization attempts.
-      def initialize class_mapper
+      def initialize class_mapper, use_mapping = true
         @class_mapper = class_mapper
         @stream = ""
         @depth = 0
+        @use_mapping = use_mapping
       end
 
       # Serialize the given object using AMF0 or AMF3. Can be called from inside
@@ -291,15 +293,41 @@ module RocketAMF
 
       def amf3_write_array array
         # Is it an array collection?
-        is_ac = false
+        is_ac = is_vi = is_vu = is_vn = is_vo = false
         if array.respond_to?(:is_array_collection?)
           is_ac = array.is_array_collection?
+        elsif array.is_a?(Values::Vector)
+          case array.type
+          when :int
+            is_vi = true
+          when :uint
+            is_vu = true
+          when :number
+            is_vn = true
+          when :object
+            is_vo = true
+          else
+            raise "unsupported vector type #{array.type}"
+          end
         else
           is_ac = @class_mapper.use_array_collection
         end
 
         # Write type marker
-        @stream << (is_ac ? AMF3_OBJECT_MARKER : AMF3_ARRAY_MARKER)
+        @stream << case
+        when is_ac
+          AMF3_OBJECT_MARKER
+        when is_vi
+          AMF3_VEC_INT_MARKER
+        when is_vu
+          AMF3_VEC_UINT_MARKER
+        when is_vn
+          AMF3_VEC_NUMBER_MARKER
+        when is_vo
+          AMF3_VEC_OBJECT_MARKER
+        else
+          AMF3_ARRAY_MARKER
+        end
 
         # Write reference or cache array
         if @object_cache[array] != nil
@@ -327,9 +355,50 @@ module RocketAMF
         header = array.length << 1 # make room for a low bit of 1
         header = header | 1 # set the low bit to 1
         @stream << pack_integer(header)
-        @stream << AMF3_CLOSE_DYNAMIC_ARRAY
-        array.each do |elem|
-          amf3_serialize elem
+        
+        if is_vi || is_vu || is_vn || is_vo
+          @stream << pack_int8(0) # set fixed-length property to false
+
+          # special case for vector of objects
+          if is_vo
+            # get type of object stored in vector
+            if array.object_type.is_a? String # if string, name maps to Flex object with such alias
+              class_name = array.object_type
+            else # get class name by using mappings table
+              class_name = @class_mapper.get_as_class_name array.object_type
+            end
+
+            if class_name.nil?
+              class_name = array.object_type.name
+            end
+
+            # write out class name
+            amf3_write_utf8_vr(class_name)
+
+            if array.length > 0
+              # create ad hoc traits for the array element
+              traits = {
+                :class_name => class_name,
+                :members => ClassMapper.props_for_serialization(array.first).keys.sort,
+                :externalizable => false,
+                :dynamic => false
+              }
+
+              #write all array's elements
+              array.each do |elem|
+                amf3_write_object elem, nil, traits
+              end
+            end
+          else
+            array.each do |elem|
+              amf3_serialize elem
+            end
+          end
+        else
+          @stream << AMF3_CLOSE_DYNAMIC_ARRAY
+          array.each do |elem|
+            amf3_serialize elem
+          end
         end
       end
 
@@ -342,12 +411,18 @@ module RocketAMF
           return
         end
         @object_cache.add_obj obj
-
+        
+        if @use_mapping
+          as_class_name = @class_mapper.get_as_class_name obj
+        else
+          as_class_name = obj.type
+        end
+        
         # Calculate traits if not given
         is_default = false
         if traits.nil?
           traits = {
-                    :class_name => @class_mapper.get_as_class_name(obj),
+                    :class_name => as_class_name,
                     :members => [],
                     :externalizable => false,
                     :dynamic => true
@@ -357,7 +432,8 @@ module RocketAMF
         class_name = is_default ? "__default__" : traits[:class_name]
 
         # Write out traits
-        if (class_name && @trait_cache[class_name] != nil)
+        if (class_name && @trait_cache[class_name] != nil &&
+          !(obj.respond_to?(:traits_not_cached?, true) && obj.send(:traits_not_cached?)))
           @stream << pack_integer(@trait_cache[class_name] << 2 | 0x01)
         else
           @trait_cache.add_obj class_name if class_name

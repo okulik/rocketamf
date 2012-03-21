@@ -1,5 +1,6 @@
 require 'rocketamf/values/typed_hash'
 require 'rocketamf/values/messages'
+require 'rocketamf/values/vector'
 
 module RocketAMF
   # Container for all mapped classes

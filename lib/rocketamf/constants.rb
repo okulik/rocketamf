@@ -33,13 +33,17 @@ module RocketAMF
   AMF3_OBJECT_MARKER       =  0x0A #"\n"
   AMF3_XML_MARKER          =  0x0B #"\v"
   AMF3_BYTE_ARRAY_MARKER   =  0x0C #"\f"
+  AMF3_VEC_INT_MARKER      =  0x0D
+  AMF3_VEC_UINT_MARKER     =  0x0E
+  AMF3_VEC_NUMBER_MARKER   =  0x0F
+  AMF3_VEC_OBJECT_MARKER   =  0x10
   AMF3_DICT_MARKER         =  0x11 #"\021"
 
   # Other AMF3 Markers
   AMF3_EMPTY_STRING             = 0x01
   AMF3_CLOSE_DYNAMIC_OBJECT     = 0x01
   AMF3_CLOSE_DYNAMIC_ARRAY      = 0x01
-
+  
   # Other Constants
   MAX_INTEGER               = 268435455
   MIN_INTEGER               = -268435456
